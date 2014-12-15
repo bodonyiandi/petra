@@ -64,14 +64,28 @@ int main(int argc, char** argv)
 		for (auto& item:buff)
 		{
 			if(item.type() == osmium::item_type::way)
-			{
+			{ 
 				osmium::Way& r = static_cast<osmium::Way&>(item);
+			  
+				const char* highway = r.tags() ["highway"];
+				if(!highway)
+				  continue;
+				
+				if ( !strcmp ( highway, "footway" )
+				      || !strcmp ( highway, "cycleway" )
+				      || !strcmp ( highway, "bridleway" )
+				      || !strcmp ( highway, "steps" )
+				      || !strcmp ( highway, "path" )
+				      || !strcmp ( highway, "construction" ) )
+				  continue;
+				
+				
 				for(int i=1;i<r.nodes().size();i++)
 				{
 				    csomopont_adat& cs=terkep[r.nodes()[i].ref()];
 				    csomopont_adat& cs2=terkep[r.nodes()[i-1].ref()];
 				    cs.szomszedok.insert(cs2.id);
-				    cs2.szomszedok.insert(cs.id);
+				    cs2.szomszedok.insert(cs.id); 
 				} 
 				
 			}
@@ -81,6 +95,7 @@ int main(int argc, char** argv)
 	
 	osmium::Location kezdop(atof(argv[2]),atof(argv[3]));
 	osmium::Location vegp(atof(argv[4]),atof(argv[5]));
+	
 	
 	double dp=INFINITY;
 	double dp2=INFINITY;
@@ -100,78 +115,74 @@ int main(int argc, char** argv)
 	  
 	  
 	}
+	
 	for(auto& item:terkep)
 	{
+	  dv=distance(vegp,item.second.loc);
 	  if (dv < dp2)
 	  {
-	    dv=distance(vegp,item.second.loc);
+	    
 	    dp2=dv;
 	    legkozelebbiveg=item.second.id;
 	  }
 	}
 	
-	std::cout << legkozelebbi << " / " << legkozelebbiveg << std::endl;
-	
-	std::queue<osmium::object_id_type> to_visit;
-	std::map<osmium::object_id_type,double> tav;
-	
-	tav.insert({legkozelebbi,0});
-	for(auto& item:terkep[legkozelebbi].szomszedok)
-	  {
-	      to_visit.push(legkozelebbi);
-	      to_visit.push(item);
-	  }
-	  
-	  
-	while (!to_visit.empty())
-	  {
-	      osmium::object_id_type szulo;
-	      osmium::object_id_type gyerek;
-	      
-	      szulo=to_visit.front();
-	      to_visit.pop();
-	      gyerek=to_visit.front();
-	      to_visit.pop();
-	      if (tav.count(gyerek)) //itt meg nem jartunk
-		  {
-		    continue;
-		  }
-	      tav.insert({gyerek,tav[szulo]+distance(terkep[szulo].loc,terkep[gyerek].loc)});
-	      for(auto& item:terkep[gyerek].szomszedok)
-		{
-		  to_visit.push(gyerek);
-		  to_visit.push(item);
-		}
-	  }
-	  
-	cout<<tav[legkozelebbiveg]<<std::endl;
-	osmium::object_id_type aktualis;
-	aktualis=legkozelebbiveg;
-	std::list<osmium::object_id_type> lista;
-	for (;;)
-	{   
-	    osmium::object_id_type kozeli_csp=*terkep[aktualis].szomszedok.begin();
-	    double min=tav[kozeli_csp];
-	    lista.push_front(aktualis);
-	    if (aktualis==legkozelebbi) //ha visszaertunk a kezdopontba
-	      break;
-	    for (auto& item:terkep[aktualis].szomszedok)
-	    {
-		if (tav[item]<min)
-		{
-		  min=tav[item];
-		  kozeli_csp=item;
-		}
-	    }
-	    aktualis=kozeli_csp;
-	}
-	int db=0;
-	for (auto& item:lista)
+	std::list<osmium::object_id_type> utvonal;
+
 	{
-	    db++;
-	    cout<<terkep[item].loc<<std::endl;
+	  std::map<osmium::object_id_type, double> dstmap;
+	  std::map<osmium::object_id_type, osmium::object_id_type> previous;
+	  std::set<std::pair<double, osmium::object_id_type>> to_visit;
+	  
+	  for(auto& np : terkep)
+	  {
+	    osmium::object_id_type n = np.first;
+	    
+	    if(n == legkozelebbi)
+		dstmap.insert({legkozelebbi, 0.0});
+	    else
+		dstmap.insert({n, INFINITY});
+	  }
+	
+	  to_visit.insert({0.0, legkozelebbi});
+	  
+	  while(!to_visit.empty())
+	  {
+	    osmium::object_id_type u = to_visit.begin()->second;
+	    double u_dst = to_visit.begin()->first;
+	    to_visit.erase(to_visit.begin());
+	   
+	    
+	    for(auto& v: terkep[u].szomszedok)
+	    {
+	      double cost = osmium::geom::haversine::distance(terkep[u].loc, terkep[v].loc);
+	      double dst = u_dst + cost;
+	     
+	      if(dst < dstmap[v])
+	      {
+		if(dstmap[v] != INFINITY)
+		  to_visit.erase({dstmap[v], v});
+		
+		dstmap[v] = dst;
+		previous.insert({v,u});
+		previous[v] = u;
+		
+		to_visit.insert({dst, v});
+	      }
+	    }
+
+	  }
+	  
+	  osmium::object_id_type at = legkozelebbiveg;
+	  for(osmium::object_id_type at=legkozelebbiveg; at!=0; at = previous[at])
+	  {
+	     //cout << terkep[at].loc.lat() << " " << terkep[at].loc.lon() <<std::endl;
+	     utvonal.push_front(at);
+	  }
+	  for (auto& it:utvonal)
+	    std::cout<<terkep[it].loc.lat()<<" "<<terkep[it].loc.lon()<<std::endl;
+
 	}
-	cout<<"DB:"<<db;
 	
 	return 0;
 }
